@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Copyright (C) 2017-2018 Nathan Chancellor
+
+TARGET_VERSION=LA.UM.7.2.r1-05100-sdm660.0
+CURRENT_VERSION=LA.UM.7.2.r1-04900-sdm660.0
+
+git remote add caf https://source.codeaurora.org/quic/la/kernel/msm-4.4
+git fetch caf
+
+RANGE=b84ec02e99963bc70bb27d59685707fbb02a36ed..5d5c79a8e42852e608506630c09a3d0196c6dcc1
+
+TAG=${TARGET_VERSION}
+#wlan-cld3.driver.lnx.1.1.r41-rel
+
+function create_merge_message() {
+    MSG_FILE=$(mktemp)
+    echo "Merge tag ${TARGET_VERSION} into KCUF" >> "${MSG_FILE}"
+    echo "\nChanges in ${TARGET_VERSION}: ($(git rev-list --count "${RANGE}" 2> /dev/null) commits)" >> "${MSG_FILE}"
+    git log --reverse --format="        %s" "${RANGE}" >> "${MSG_FILE}"
+    echo "\nSigned-off-by: $(git config --get user.name) <$(git config --get user.email)>" >> "${MSG_FILE}"
+}
+
+function append_conflicts() {
+    echo "\nConflicts:" >> "${MSG_FILE}"
+    for FILE in $(git cf); do
+        echo "\t${FILE}" >> "${MSG_FILE}"
+    done
+}
+
+function mg_target_version() {
+    header "Merging ${TARGET_VERSION}"
+
+    create_merge_message
+    if ! GIT_MERGE_VERBOSITY=1 git merge --gpg-sign --no-edit "${TAG}"; then
+        append_conflicts
+        mv "${MSG_FILE}" /tmp/mrg-msg
+        die "Merge needs manual intervention! Resolve conflicts then run git fm."
+    else
+        gpg_available
+        git commit --amend --date="$(date)" --file "${MSG_FILE}" --gpg-sign --no-edit --quiet
+        rm -f "${MSG_FILE}"
+        header "${TARGET_VERSION} MERGED CLEANLY!" "${GRN}"
+    fi
+}
+
+function update_tree() {
+    mg_target_version ;
+    exit 0
+}
+
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" || return; pwd)/common"
+trap 'echo; die "Manually aborted!"' SIGINT SIGTERM
+update_tree
